@@ -64,7 +64,7 @@ export default function LoginPage() {
             <input 
               type="text" required value={name} onChange={(e) => setName(e.target.value)}
               className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
-              placeholder="Misal: Awen"
+              placeholder="Misal: Jesrel"
             />
           </div>
 
