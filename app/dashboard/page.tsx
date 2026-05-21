@@ -12,7 +12,7 @@ import { useRouter } from "next/navigation";
 import Loader from "../../components/Loader";
 
 // ⚠️ PASTE URL WEB APP BARU YANG KAMU DEPLOY DARI GOOGLE APPS SCRIPT DI SINI
-const GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbxISalRXsq3Sxb7tiCXF7Vig3hkjyHDqNrRkXZtiCIYP8OArPLXHrZ0uUZ3w12mWGw6DA/exec";
+const GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbwRM8VN17E77zQBsNeRzUdDnVrwFE2rFdUZc3NoFB7maRiOMjQSraVNd0ZWE0StMA3jqA/exec";
 
 const getStatusStyles = (status: string) => {
   const currentStatus = status ? status.toLowerCase() : 'pending';
@@ -49,7 +49,6 @@ export default function DashboardLayout() {
       const data = await res.json();
       setTasks(data);
       
-      // Jika modal detail lagi kebuka, update datanya biar list file terbaru langsung keliatan
       if (selectedTask) {
         const currentOpen = data.find((t: any) => t.id === selectedTask.id);
         if (currentOpen) setSelectedTask(currentOpen);
@@ -126,6 +125,7 @@ export default function DashboardLayout() {
     }
   };
 
+  // 🔥 LOGIKA UPLOAD DIPERBARUI DENGAN LOADING SPINNER
   const handleUploadFilesToDrive = async (taskId: number, file: File) => {
     if (!GOOGLE_SHEET_URL || GOOGLE_SHEET_URL.includes("PASTE_URL_WEB_APP")) {
       alert("Harap masukkan URL Web App Google Sheets kamu di bagian atas kode terlebih dahulu.");
@@ -138,18 +138,18 @@ export default function DashboardLayout() {
       const base64String = (reader.result as string).split(",")[1];
       const fileSizeString = (file.size / (1024 * 1024)).toFixed(2) + " MB";
 
-      // 1. Suntikkan file ke layar secara lokal dulu agar instan muncul tanpa menunggu antrean Google
-      const mockFile = { name: file.name, size: fileSizeString, url: "#" };
+      // 1. Kasih tanda ke layar bahwa file sedang di-upload (Loading state)
+      const mockFile = { name: file.name, size: "Uploading...", url: "uploading" };
       setTasks(prevTasks => prevTasks.map(t => 
         t.id === taskId ? { ...t, files: [...(t.files || []), mockFile] } : t
       ));
       setSelectedTask((prev: any) => ({ ...prev, files: [...(prev?.files || []), mockFile] }));
 
       try {
-        // 2. Kirim datanya ke Google di background
+        // 2. Kirim data ke Google Drive di background
         await fetch(GOOGLE_SHEET_URL, {
           method: "POST",
-          mode: "no-cors", // Memotong pemblokiran CORS browser
+          mode: "no-cors",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             action: "upload_file",
@@ -161,10 +161,10 @@ export default function DashboardLayout() {
           }),
         });
 
-        // 3. Ambil data ulang dari sheet agar link unduhan Google Drive aslinya sinkron
+        // 3. Tunggu 2 detik agar Drive selesai generate link, lalu ambil ulang datanya
         setTimeout(() => {
           fetchTasksFromSheets();
-        }, 1500);
+        }, 2000);
 
       } catch (error) {
         console.error("Gagal mengupload file ke Drive:", error);
@@ -206,7 +206,6 @@ export default function DashboardLayout() {
   return (
     <div className={`flex h-screen overflow-hidden antialiased transition-colors duration-300 ${bgMain}`}>
       
-      {/* --- SIDEBAR KIRI --- */}
       <aside className={`w-64 flex flex-col z-10 shrink-0 border-r transition-colors duration-300 ${bgSidebar}`}>
         <div className={`h-16 flex items-center px-6 border-b transition-colors duration-300 ${isDarkMode ? "border-gray-800" : "border-gray-100"}`}>
           <div className="flex items-center gap-2 font-bold text-lg tracking-tight">
@@ -226,7 +225,6 @@ export default function DashboardLayout() {
         </nav>
       </aside>
 
-      {/* --- KONTEN UTAMA --- */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden">
         {activeTab === "projects" && (
           <header className={`h-16 flex items-center justify-between px-8 shrink-0 border-b transition-colors duration-300 ${bgHeader}`}>
@@ -283,8 +281,8 @@ export default function DashboardLayout() {
           {activeTab === "schedule" && (
             <div className="max-w-4xl mx-auto">
               <div className="mb-6">
-                <h1 className={`text-2xl font-bold tracking-tight ${textTitle}`}>Match Timeline Agenda</h1>
-                <p className={`text-sm mt-1 ${textSub}`}>Tampilan urutan jadwal seluruh stream turnamen agar jam tidak bentrok.</p>
+                <h1 className={`text-2xl font-bold tracking-tight mb-2 ${textTitle}`}>Match Timeline Agenda</h1>
+                <p className={`text-sm ${textSub}`}>Tampilan urutan jadwal seluruh stream turnamen agar jam tidak bentrok.</p>
               </div>
               <div className={`rounded-2xl border overflow-hidden ${bgCard}`}>
                 {tasks.length === 0 ? (
@@ -356,7 +354,6 @@ export default function DashboardLayout() {
         </div>
       </main>
 
-      {/* --- MODAL DIALOGS --- */}
       <AnimatePresence>
         {isCreateModalOpen && <CreateModal isDark={isDarkMode} onClose={() => setIsCreateModalOpen(false)} onSave={handleAddBrief} />}
         {selectedTask && (
@@ -451,7 +448,6 @@ function CreateModal({ onClose, onSave, isDark }: any) {
 function DetailModal({ task, onClose, onUploadSingleFile, onUpdateStatus, isDark }: any) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Menerima banyak file gambar / video sekaligus dari browser, lalu dikirim bergiliran ke Drive
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       Array.from(e.target.files).forEach(file => {
@@ -476,7 +472,7 @@ function DetailModal({ task, onClose, onUploadSingleFile, onUpdateStatus, isDark
       <motion.div initial={{ scale: 0.98, y: 10 }} animate={{ scale: 1, y: 0 }} className={`relative w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] border ${bgModal}`}>
         
         <div className={`px-8 py-6 border-b flex justify-between items-center sticky top-0 z-10 ${bgHeader}`}>
-          <h2 className={`text-2xl font-bold ${textTitle}`}>{task.title}</h2>
+          <div><h2 className={`text-2xl font-bold ${textTitle}`}>{task.title}</h2></div>
           <button onClick={onClose} className={`p-2 rounded-lg border transition-colors ${isDark ? "bg-gray-800 border-gray-700 text-gray-400 hover:text-white" : "bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100"}`}>
             <X className="w-5 h-5" />
           </button>
@@ -493,8 +489,7 @@ function DetailModal({ task, onClose, onUploadSingleFile, onUpdateStatus, isDark
                    const isActive = task.status?.toLowerCase() === st;
                    return (
                       <button key={st} onClick={() => onUpdateStatus(st)} className={`px-3 py-1.5 text-xs font-bold rounded-lg uppercase tracking-wider transition-all flex items-center gap-1 border ${isActive ? "bg-blue-600 text-white border-blue-600 shadow-sm" : isDark ? "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700" : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100"}`}>
-                         {isActive && <Check className="w-3.5 h-3.5" />}
-                         {st}
+                         {isActive && <Check className="w-3.5 h-3.5" />} {st}
                       </button>
                    )
                 })}
@@ -514,7 +509,6 @@ function DetailModal({ task, onClose, onUploadSingleFile, onUpdateStatus, isDark
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className={`p-6 rounded-xl border ${bgCard}`}>
               <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Upload Design / Assets</h4>
-              {/* DI-UPDATE: Menerima gambar dan video sekaligus */}
               <input type="file" multiple ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*,video/*" />
               <div onClick={() => fileInputRef.current?.click()} className={`border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center text-center cursor-pointer transition-all ${dashedBox}`}>
                 <UploadCloud className="w-6 h-6 text-blue-600 mb-2" />
@@ -529,16 +523,23 @@ function DetailModal({ task, onClose, onUploadSingleFile, onUpdateStatus, isDark
                 {task.files && task.files.length > 0 ? task.files.map((file: any, i: number) => (
                   <div key={i} className={`flex items-center justify-between p-3 rounded-lg border ${bgList}`}>
                     <div className="flex items-center gap-3 overflow-hidden">
-                      <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />
+                      <CheckCircle2 className={`w-4 h-4 shrink-0 ${file.url === "uploading" ? "text-gray-400" : "text-green-500"}`} />
                       <div className="truncate">
                         <p className={`text-sm font-medium truncate ${textTitle}`}>{file.name}</p>
-                        <p className="text-xs text-gray-400">{file.size}</p>
+                        <p className={`text-xs ${file.url === "uploading" ? "text-blue-500 animate-pulse font-bold" : "text-gray-400"}`}>{file.size}</p>
                       </div>
                     </div>
-                    {/* Link Download Permanen mengarah langsung ke aset Google Drive */}
-                    <a href={file.url} target="_blank" rel="noopener noreferrer" className={`p-2 rounded-lg border transition-colors shadow-sm shrink-0 ${btnDownload}`}>
-                      <Download className="w-4 h-4" />
-                    </a>
+                    
+                    {/* Render muter muter loading atau icon download */}
+                    {file.url === "uploading" ? (
+                      <div className="p-2 shrink-0">
+                        <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                      </div>
+                    ) : (
+                      <a href={file.url} target="_blank" rel="noopener noreferrer" className={`p-2 rounded-lg border transition-colors shadow-sm shrink-0 ${btnDownload}`}>
+                        <Download className="w-4 h-4" />
+                      </a>
+                    )}
                   </div>
                 )) : (
                   <div className={`h-24 flex flex-col items-center justify-center border border-dashed rounded-xl ${isDark ? "border-gray-700" : "border-gray-200"}`}>
