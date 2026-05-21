@@ -12,7 +12,7 @@ import { useRouter } from "next/navigation";
 import Loader from "../../components/Loader";
 
 // ⚠️ PASTE URL WEB APP BARU YANG KAMU DEPLOY DARI GOOGLE APPS SCRIPT DI SINI
-const GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbz84bdlA4Z0vcnuXUA5iQtxDbXidUtqkVkKxGBe1fvJhEMN_cl2BLlhOfMMcEpx7RA3gg/exec";
+const GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbxISalRXsq3Sxb7tiCXF7Vig3hkjyHDqNrRkXZtiCIYP8OArPLXHrZ0uUZ3w12mWGw6DA/exec";
 
 const getStatusStyles = (status: string) => {
   const currentStatus = status ? status.toLowerCase() : 'pending';
@@ -126,7 +126,6 @@ export default function DashboardLayout() {
     }
   };
 
-  // 🔥 UPDATE LOGIKA UPLOAD: Mengubah file gambar/video jadi base64 lalu dikirim permanen ke Google Drive
   const handleUploadFilesToDrive = async (taskId: number, file: File) => {
     if (!GOOGLE_SHEET_URL || GOOGLE_SHEET_URL.includes("PASTE_URL_WEB_APP")) {
       alert("Harap masukkan URL Web App Google Sheets kamu di bagian atas kode terlebih dahulu.");
@@ -139,13 +138,18 @@ export default function DashboardLayout() {
       const base64String = (reader.result as string).split(",")[1];
       const fileSizeString = (file.size / (1024 * 1024)).toFixed(2) + " MB";
 
-      // Kasih info loading kecil
-      alert(`Sedang mengunggah "${file.name}" secara permanen ke Google Drive kamu, mohon tunggu sebentar...`);
+      // 1. Suntikkan file ke layar secara lokal dulu agar instan muncul tanpa menunggu antrean Google
+      const mockFile = { name: file.name, size: fileSizeString, url: "#" };
+      setTasks(prevTasks => prevTasks.map(t => 
+        t.id === taskId ? { ...t, files: [...(t.files || []), mockFile] } : t
+      ));
+      setSelectedTask((prev: any) => ({ ...prev, files: [...(prev?.files || []), mockFile] }));
 
       try {
+        // 2. Kirim datanya ke Google di background
         await fetch(GOOGLE_SHEET_URL, {
           method: "POST",
-          mode: "no-cors",
+          mode: "no-cors", // Memotong pemblokiran CORS browser
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             action: "upload_file",
@@ -157,8 +161,11 @@ export default function DashboardLayout() {
           }),
         });
 
-        // Ambil data ulang dari sheet agar daftarnya permanen ter-update di layar
-        fetchTasksFromSheets();
+        // 3. Ambil data ulang dari sheet agar link unduhan Google Drive aslinya sinkron
+        setTimeout(() => {
+          fetchTasksFromSheets();
+        }, 1500);
+
       } catch (error) {
         console.error("Gagal mengupload file ke Drive:", error);
       }
