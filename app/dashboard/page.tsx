@@ -11,27 +11,35 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import Loader from "../../components/Loader";
 
-// ⚠️ PASTE URL WEB APP DARI GOOGLE APPS SCRIPT DI SINI
-const GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbxntI_QCaicVvvNsH6-mYPtdTCYtpU3O7Bq_MbjCNLyKdlBu1_ZgeU9qJ_G8Y1QK0K9YQ/exec";
+// ⚠️ PASTE URL WEB APP BARU YANG KAMU DEPLOY DARI GOOGLE APPS SCRIPT DI SINI
+const GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbz84bdlA4Z0vcnuXUA5iQtxDbXidUtqkVkKxGBe1fvJhEMN_cl2BLlhOfMMcEpx7RA3gg/exec";
+
+const getStatusStyles = (status: string) => {
+  const currentStatus = status ? status.toLowerCase() : 'pending';
+  switch(currentStatus) {
+    case 'on going': return { bg: 'bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400', dot: 'bg-blue-500' };
+    case 'completed': return { bg: 'bg-green-50 text-green-600 dark:bg-green-950/40 dark:text-green-400', dot: 'bg-green-500' };
+    case 'pending':
+    default: return { bg: 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400', dot: 'bg-amber-500' };
+  }
+};
 
 export default function DashboardLayout() {
   const router = useRouter();
   
-  // --- STATE UTAMA ---
   const [isLoading, setIsLoading] = useState(true);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [tasks, setTasks] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all"); // State baru untuk filter
+  const [statusFilter, setStatusFilter] = useState("all"); 
   const [activeTab, setActiveTab] = useState("projects");
   const [userProfile, setUserProfile] = useState({ name: "Guest", email: "guest@streamdesk.com" });
   
-  // State Modals
   const [selectedTask, setSelectedTask] = useState<any>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   const fetchTasksFromSheets = async () => {
-    if (GOOGLE_SHEET_URL === "PASTE_URL_WEB_APP_KAMU_DISINI") {
+    if (!GOOGLE_SHEET_URL || GOOGLE_SHEET_URL.includes("PASTE_URL_WEB_APP")) {
       setIsLoading(false);
       return;
     }
@@ -40,6 +48,12 @@ export default function DashboardLayout() {
       const res = await fetch(GOOGLE_SHEET_URL);
       const data = await res.json();
       setTasks(data);
+      
+      // Jika modal detail lagi kebuka, update datanya biar list file terbaru langsung keliatan
+      if (selectedTask) {
+        const currentOpen = data.find((t: any) => t.id === selectedTask.id);
+        if (currentOpen) setSelectedTask(currentOpen);
+      }
     } catch (error) {
       console.error("Gagal mengambil data:", error);
     } finally {
@@ -65,7 +79,7 @@ export default function DashboardLayout() {
   const handleAddBrief = async (newTask: any) => {
     setTasks([newTask, ...tasks]);
     setIsCreateModalOpen(false);
-    if (GOOGLE_SHEET_URL === "PASTE_URL_WEB_APP_KAMU_DISINI") return;
+    if (!GOOGLE_SHEET_URL || GOOGLE_SHEET_URL.includes("PASTE_URL_WEB_APP")) return;
     try {
       await fetch(GOOGLE_SHEET_URL, {
         method: "POST", mode: "no-cors",
@@ -81,7 +95,7 @@ export default function DashboardLayout() {
   const handleDeleteTask = async (id: number, e: React.MouseEvent) => {
     e.stopPropagation();
     setTasks(tasks.filter(t => t.id !== id));
-    if (GOOGLE_SHEET_URL === "PASTE_URL_WEB_APP_KAMU_DISINI") return;
+    if (!GOOGLE_SHEET_URL || GOOGLE_SHEET_URL.includes("PASTE_URL_WEB_APP")) return;
     try {
       await fetch(GOOGLE_SHEET_URL, {
         method: "POST", mode: "no-cors",
@@ -99,7 +113,7 @@ export default function DashboardLayout() {
     setTasks(updated);
     setSelectedTask((prev: any) => ({ ...prev, status: newStatus }));
 
-    if (GOOGLE_SHEET_URL === "PASTE_URL_WEB_APP_KAMU_DISINI") return;
+    if (!GOOGLE_SHEET_URL || GOOGLE_SHEET_URL.includes("PASTE_URL_WEB_APP")) return;
     try {
       await fetch(GOOGLE_SHEET_URL, {
         method: "POST", mode: "no-cors",
@@ -108,8 +122,47 @@ export default function DashboardLayout() {
       });
       fetchTasksFromSheets();
     } catch (error) {
-      console.error("Gagal mengubah status di Google Sheets:", error);
+      console.error("Gagal mengubah status:", error);
     }
+  };
+
+  // 🔥 UPDATE LOGIKA UPLOAD: Mengubah file gambar/video jadi base64 lalu dikirim permanen ke Google Drive
+  const handleUploadFilesToDrive = async (taskId: number, file: File) => {
+    if (!GOOGLE_SHEET_URL || GOOGLE_SHEET_URL.includes("PASTE_URL_WEB_APP")) {
+      alert("Harap masukkan URL Web App Google Sheets kamu di bagian atas kode terlebih dahulu.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = async () => {
+      const base64String = (reader.result as string).split(",")[1];
+      const fileSizeString = (file.size / (1024 * 1024)).toFixed(2) + " MB";
+
+      // Kasih info loading kecil
+      alert(`Sedang mengunggah "${file.name}" secara permanen ke Google Drive kamu, mohon tunggu sebentar...`);
+
+      try {
+        await fetch(GOOGLE_SHEET_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "upload_file",
+            id: taskId,
+            fileName: file.name,
+            fileType: file.type,
+            fileSize: fileSizeString,
+            fileBytes: base64String
+          }),
+        });
+
+        // Ambil data ulang dari sheet agar daftarnya permanen ter-update di layar
+        fetchTasksFromSheets();
+      } catch (error) {
+        console.error("Gagal mengupload file ke Drive:", error);
+      }
+    };
   };
 
   const handleLogOut = () => {
@@ -117,15 +170,11 @@ export default function DashboardLayout() {
     router.push("/");
   };
 
-  const handleUploadFiles = (taskId: number, newFiles: any[]) => {
-    setTasks(tasks.map(t => t.id === taskId ? { ...t, files: [...t.files, ...newFiles] } : t));
-    setSelectedTask((prev: any) => ({ ...prev, files: [...prev.files, ...newFiles] }));
-  };
-
-  // 🔥 UPDATE LOGIKA FILTER: Gabungan Search + Status Filter
   const filteredTasks = tasks.filter(t => {
-    const matchesSearch = t.title.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === "all" || t.status?.toLowerCase() === statusFilter.toLowerCase();
+    const titleText = t.title ? t.title.toLowerCase() : "";
+    const matchesSearch = titleText.includes(searchQuery.toLowerCase());
+    const currentStatus = t.status ? t.status.toLowerCase() : "pending";
+    const matchesStatus = statusFilter === "all" || currentStatus === statusFilter.toLowerCase();
     return matchesSearch && matchesStatus;
   });
 
@@ -134,13 +183,12 @@ export default function DashboardLayout() {
       <div className={`flex flex-col h-screen items-center justify-center ${isDarkMode ? "bg-[#111827] text-white" : "bg-[#f7f8fa] text-gray-900"}`}>
         <Loader />
         <p className={`mt-8 text-sm font-bold uppercase tracking-widest animate-pulse ${isDarkMode ? "text-gray-400" : "text-gray-500"}`}>
-          Sabar mas lagi kirim/cari data...
+          Syncing with Google Sheets & Drive...
         </p>
       </div>
     );
   }
 
-  // --- TEMA WARNA THEME ---
   const bgMain = isDarkMode ? "bg-[#111827] text-gray-100" : "bg-[#f7f8fa] text-[#111827]";
   const bgSidebar = isDarkMode ? "bg-gray-900 border-gray-800" : "bg-white border-gray-200";
   const bgHeader = isDarkMode ? "bg-gray-900 border-gray-800" : "bg-white border-gray-200";
@@ -190,37 +238,19 @@ export default function DashboardLayout() {
         )}
 
         <div className="flex-1 overflow-y-auto p-8 w-full">
-          
-          {/* TAB: PROJECTS */}
           {activeTab === "projects" && (
             <div className="w-full">
-              
-              {/* HEADER PROJECTS & FITUR FILTER STATUS */}
               <div className="mb-8 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
                 <div>
                   <h1 className={`text-2xl font-bold tracking-tight ${textTitle}`}>Active Projects</h1>
                   <p className={`text-sm mt-1 ${textSub}`}>Kelola kebutuhan desain overlay dan turnamen kamu langsung dari Google Sheets.</p>
                 </div>
-                
-                {/* TOMBOL FILTER */}
                 <div className={`flex items-center gap-1 p-1 rounded-xl border ${isDarkMode ? "bg-gray-900 border-gray-800" : "bg-white border-gray-200 shadow-sm"}`}>
                   <div className={`px-2 ${isDarkMode ? "text-gray-500" : "text-gray-400"}`}>
                     <Filter className="w-4 h-4" />
                   </div>
                   {["all", "pending", "on going", "completed"].map((f) => (
-                    <button
-                      key={f}
-                      onClick={() => setStatusFilter(f)}
-                      className={`px-4 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${
-                        statusFilter === f 
-                          ? "bg-blue-600 text-white shadow-sm" 
-                          : isDarkMode 
-                            ? "text-gray-400 hover:text-gray-200 hover:bg-gray-800" 
-                            : "text-gray-500 hover:text-gray-900 hover:bg-gray-50"
-                      }`}
-                    >
-                      {f}
-                    </button>
+                    <button key={f} onClick={() => setStatusFilter(f)} className={`px-4 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${statusFilter === f ? "bg-blue-600 text-white shadow-sm" : isDarkMode ? "text-gray-400 hover:text-gray-200 hover:bg-gray-800" : "text-gray-500 hover:text-gray-900 hover:bg-gray-50"}`}>{f}</button>
                   ))}
                 </div>
               </div>
@@ -231,7 +261,7 @@ export default function DashboardLayout() {
                     <FolderKanban className={`w-6 h-6 ${isDarkMode ? "text-gray-500" : "text-gray-400"}`} />
                   </div>
                   <h3 className={`text-lg font-bold ${textTitle}`}>Belum ada Brief</h3>
-                  <p className={`text-sm mt-1 mb-4 ${textSub}`}>Tidak ada data yang sesuai dengan pencarian atau filter.</p>
+                  <p className={`text-sm mt-1 mb-4 ${textSub}`}>Tidak ada data yang cocok dengan pencarian atau opsi filter status.</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 w-full">
@@ -243,14 +273,12 @@ export default function DashboardLayout() {
             </div>
           )}
 
-          {/* TAB VIEW: SCHEDULE (TIMELINE VIEW FILTER AGENDA) */}
           {activeTab === "schedule" && (
             <div className="max-w-4xl mx-auto">
               <div className="mb-6">
                 <h1 className={`text-2xl font-bold tracking-tight ${textTitle}`}>Match Timeline Agenda</h1>
                 <p className={`text-sm mt-1 ${textSub}`}>Tampilan urutan jadwal seluruh stream turnamen agar jam tidak bentrok.</p>
               </div>
-              
               <div className={`rounded-2xl border overflow-hidden ${bgCard}`}>
                 {tasks.length === 0 ? (
                   <p className={`text-center py-12 text-sm ${textSub}`}>Tidak ada jadwal streaming aktif saat ini.</p>
@@ -262,19 +290,18 @@ export default function DashboardLayout() {
                         <div key={task.id} className={`p-5 flex items-center justify-between transition-colors ${isDarkMode ? "hover:bg-gray-800/50" : "hover:bg-gray-50"}`}>
                           <div className="flex items-center gap-5">
                             <div className={`w-20 py-2.5 rounded-xl flex flex-col items-center justify-center font-bold text-center shadow-sm ${isDarkMode ? "bg-blue-950/40 text-blue-400 border border-blue-900/50" : "bg-blue-50 text-blue-600 border border-blue-100"}`}>
-                              <span className="text-sm tracking-tight">{task.date}</span>
+                              <span className="text-sm tracking-tight">{task.date || "-"}</span>
                             </div>
                             <div>
                               <h4 className={`font-bold text-base ${textTitle}`}>{task.title}</h4>
                               <div className={`flex flex-wrap gap-x-4 gap-y-1 text-xs mt-1.5 ${textSub}`}>
-                                <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-blue-500" /> Jam: {task.startTime}</span>
-                                <span className="flex items-center gap-1"><Gamepad2 className="w-3.5 h-3.5 text-gray-400" /> {task.match}</span>
+                                <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-blue-500" /> Jam: {task.startTime || "-"}</span>
+                                <span className="flex items-center gap-1"><Gamepad2 className="w-3.5 h-3.5 text-gray-400" /> {task.match || "-"}</span>
                               </div>
                             </div>
                           </div>
                           <div className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${styles.bg}`}>
-                            <div className={`w-1.5 h-1.5 rounded-full ${styles.dot}`} />
-                            {task.status}
+                            <div className={`w-1.5 h-1.5 rounded-full ${styles.dot}`} />{task.status || "pending"}
                           </div>
                         </div>
                       );
@@ -285,15 +312,13 @@ export default function DashboardLayout() {
             </div>
           )}
 
-          {/* TAB: SETTINGS */}
           {activeTab === "settings" && (
             <div className="max-w-3xl mx-auto">
               <h1 className={`text-2xl font-bold tracking-tight mb-6 ${textTitle}`}>Settings</h1>
-              
               <div className={`p-6 rounded-2xl border flex items-center justify-between mb-4 ${bgCard}`}>
                 <div className="flex items-center gap-4">
                   <div className={`w-14 h-14 rounded-full flex items-center justify-center font-bold text-xl uppercase ${isDarkMode ? "bg-blue-900/30 text-blue-400" : "bg-blue-100 text-blue-600"}`}>
-                    {userProfile.name.charAt(0)}
+                    {userProfile.name ? userProfile.name.charAt(0) : "G"}
                   </div>
                   <div>
                     <h3 className={`font-bold text-lg ${textTitle}`}>{userProfile.name}</h3>
@@ -333,28 +358,13 @@ export default function DashboardLayout() {
             isDark={isDarkMode} 
             onClose={() => setSelectedTask(null)} 
             onUpdateStatus={(status: string) => handleUpdateStatus(selectedTask.id, status)}
-            onUploadFiles={(files: any[]) => handleUploadFiles(selectedTask.id, files)} 
+            onUploadSingleFile={(file: File) => handleUploadFilesToDrive(selectedTask.id, file)} 
           />
         )}
       </AnimatePresence>
     </div>
   );
 }
-
-// ================= GLOBAL HELPER FUNSI WARNA STATUS BARU =================
-const getStatusStyles = (status: string) => {
-  switch(status?.toLowerCase()) {
-    case 'on going':
-      return { bg: 'bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400', dot: 'bg-blue-500' };
-    case 'completed':
-      return { bg: 'bg-green-50 text-green-600 dark:bg-green-950/40 dark:text-green-400', dot: 'bg-green-500' };
-    case 'pending':
-    default:
-      return { bg: 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400', dot: 'bg-amber-500' };
-  }
-};
-
-// ================= SUB COMPONENT WORKSPACE =================
 
 function SidebarItem({ icon, label, isActive, onClick, isDark }: any) {
   const activeClass = isDark ? "bg-blue-900/30 text-blue-400" : "bg-blue-50 text-blue-600";
@@ -371,23 +381,22 @@ function ProjectCard({ task, onClick, onDelete, isDark }: any) {
   const textTitle = isDark ? "text-gray-100 group-hover:text-blue-400" : "text-gray-900 group-hover:text-blue-600";
   const textSub = isDark ? "text-gray-400" : "text-gray-500";
   const btnTrash = isDark ? "bg-gray-900 text-gray-600 hover:text-red-400" : "bg-white text-gray-300 hover:text-red-500";
-  
   const styles = getStatusStyles(task.status);
 
   return (
     <motion.div whileHover={{ y: -4 }} onClick={onClick} className={`rounded-2xl p-6 border cursor-pointer flex flex-col h-[260px] transition-all group relative ${bg}`}>
       <div className="flex justify-between items-start mb-4">
         <div className={`px-2.5 py-1 rounded-md text-[11px] font-bold uppercase tracking-wide flex items-center gap-1.5 ${styles.bg}`}>
-          <div className={`w-1.5 h-1.5 rounded-full ${styles.dot}`} />{task.status}
+          <div className={`w-1.5 h-1.5 rounded-full ${styles.dot}`} />{task.status || "pending"}
         </div>
         <button onClick={onDelete} className={`transition-colors z-10 ${btnTrash}`}><Trash2 className="w-4 h-4" /></button>
       </div>
       <h3 className={`text-lg font-bold leading-tight mb-2 transition-colors ${textTitle}`}>{task.title}</h3>
       <p className={`text-sm leading-relaxed line-clamp-3 mb-auto ${textSub}`}>{task.desc || "Tidak ada deskripsi."}</p>
       <div className={`mt-6 pt-4 border-t flex flex-wrap gap-x-4 gap-y-2 text-xs font-medium ${isDark ? "border-gray-800 text-gray-500" : "border-gray-100 text-gray-500"}`}>
-        <div className="flex items-center gap-1.5"><CalendarIcon className="w-3.5 h-3.5" />{task.date}</div>
-        <div className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" />{task.startTime}</div>
-        <div className="flex items-center gap-1.5"><Gamepad2 className="w-3.5 h-3.5" />{task.match}</div>
+        <div className="flex items-center gap-1.5"><CalendarIcon className="w-3.5 h-3.5" />{task.date || "-"}</div>
+        <div className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" />{task.startTime || "-"}</div>
+        <div className="flex items-center gap-1.5"><Gamepad2 className="w-3.5 h-3.5" />{task.match || "-"}</div>
       </div>
     </motion.div>
   );
@@ -432,26 +441,17 @@ function CreateModal({ onClose, onSave, isDark }: any) {
   );
 }
 
-function DetailModal({ task, onClose, onUploadFiles, onUpdateStatus, isDark }: any) {
+function DetailModal({ task, onClose, onUploadSingleFile, onUpdateStatus, isDark }: any) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Menerima banyak file gambar / video sekaligus dari browser, lalu dikirim bergiliran ke Drive
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const uploadedFiles = Array.from(e.target.files).map(file => ({
-        name: file.name, size: (file.size / (1024 * 1024)).toFixed(2) + " MB", fileData: file 
-      }));
-      onUploadFiles(uploadedFiles);
+      Array.from(e.target.files).forEach(file => {
+        onUploadSingleFile(file);
+      });
       if(fileInputRef.current) fileInputRef.current.value = "";
     }
-  };
-
-  const triggerDownload = (fileObj: any) => {
-    if (!fileObj.fileData) return;
-    const url = URL.createObjectURL(fileObj.fileData);
-    const a = document.createElement("a");
-    a.href = url; a.download = fileObj.name; 
-    document.body.appendChild(a); a.click(); 
-    document.body.removeChild(a); URL.revokeObjectURL(url);
   };
 
   const bgModal = isDark ? "bg-[#111827] border-gray-800" : "bg-[#f7f8fa] border-gray-200";
@@ -469,9 +469,7 @@ function DetailModal({ task, onClose, onUploadFiles, onUpdateStatus, isDark }: a
       <motion.div initial={{ scale: 0.98, y: 10 }} animate={{ scale: 1, y: 0 }} className={`relative w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] border ${bgModal}`}>
         
         <div className={`px-8 py-6 border-b flex justify-between items-center sticky top-0 z-10 ${bgHeader}`}>
-          <div>
-            <h2 className={`text-2xl font-bold ${textTitle}`}>{task.title}</h2>
-          </div>
+          <h2 className={`text-2xl font-bold ${textTitle}`}>{task.title}</h2>
           <button onClick={onClose} className={`p-2 rounded-lg border transition-colors ${isDark ? "bg-gray-800 border-gray-700 text-gray-400 hover:text-white" : "bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100"}`}>
             <X className="w-5 h-5" />
           </button>
@@ -487,15 +485,7 @@ function DetailModal({ task, onClose, onUploadFiles, onUpdateStatus, isDark }: a
                 {["pending", "on going", "completed"].map((st) => {
                    const isActive = task.status?.toLowerCase() === st;
                    return (
-                      <button 
-                         key={st}
-                         onClick={() => onUpdateStatus(st)}
-                         className={`px-3 py-1.5 text-xs font-bold rounded-lg uppercase tracking-wider transition-all flex items-center gap-1 border ${
-                            isActive 
-                              ? "bg-blue-600 text-white border-blue-600 shadow-sm" 
-                              : isDark ? "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700" : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100"
-                         }`}
-                      >
+                      <button key={st} onClick={() => onUpdateStatus(st)} className={`px-3 py-1.5 text-xs font-bold rounded-lg uppercase tracking-wider transition-all flex items-center gap-1 border ${isActive ? "bg-blue-600 text-white border-blue-600 shadow-sm" : isDark ? "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700" : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100"}`}>
                          {isActive && <Check className="w-3.5 h-3.5" />}
                          {st}
                       </button>
@@ -516,17 +506,18 @@ function DetailModal({ task, onClose, onUploadFiles, onUpdateStatus, isDark }: a
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className={`p-6 rounded-xl border ${bgCard}`}>
-              <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Upload Design</h4>
-              <input type="file" multiple ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" />
+              <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Upload Design / Assets</h4>
+              {/* DI-UPDATE: Menerima gambar dan video sekaligus */}
+              <input type="file" multiple ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*,video/*" />
               <div onClick={() => fileInputRef.current?.click()} className={`border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center text-center cursor-pointer transition-all ${dashedBox}`}>
-                <UploadCloud className="w-6 h-6 text-blue-500 mb-2" />
+                <UploadCloud className="w-6 h-6 text-blue-600 mb-2" />
                 <p className={`text-sm font-semibold ${textTitle}`}>Click to upload file</p>
-                <p className={`text-xs mt-1 ${textSub}`}>Bisa pilih banyak gambar sekaligus</p>
+                <p className={`text-xs mt-1 ${textSub}`}>Mendukung Gambar & File Video turnamen</p>
               </div>
             </div>
 
             <div className={`p-6 rounded-xl border ${bgCard}`}>
-              <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Design Files ({task.files ? task.files.length : 0})</h4>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Cloud Design Files ({task.files ? task.files.length : 0})</h4>
               <div className="space-y-3">
                 {task.files && task.files.length > 0 ? task.files.map((file: any, i: number) => (
                   <div key={i} className={`flex items-center justify-between p-3 rounded-lg border ${bgList}`}>
@@ -537,13 +528,14 @@ function DetailModal({ task, onClose, onUploadFiles, onUpdateStatus, isDark }: a
                         <p className="text-xs text-gray-400">{file.size}</p>
                       </div>
                     </div>
-                    <button onClick={() => triggerDownload(file)} className={`p-2 rounded-lg border transition-colors shadow-sm shrink-0 ${btnDownload}`}>
+                    {/* Link Download Permanen mengarah langsung ke aset Google Drive */}
+                    <a href={file.url} target="_blank" rel="noopener noreferrer" className={`p-2 rounded-lg border transition-colors shadow-sm shrink-0 ${btnDownload}`}>
                       <Download className="w-4 h-4" />
-                    </button>
+                    </a>
                   </div>
                 )) : (
                   <div className={`h-24 flex flex-col items-center justify-center border border-dashed rounded-xl ${isDark ? "border-gray-700" : "border-gray-200"}`}>
-                    <p className={`text-sm ${textSub}`}>Belum ada file.</p>
+                    <p className={`text-sm ${textSub}`}>Belum ada file tersimpan.</p>
                   </div>
                 )}
               </div>
